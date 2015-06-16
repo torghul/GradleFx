@@ -53,6 +53,7 @@ dependencies {
     compile group: 'commons-lang', name: 'commons-lang', version: '2.6'
     compile group: 'commons-io', name: 'commons-io', version: '2.4'
     compile group: 'org.codehaus.groovy', name: 'groovy-all', version: '2.3.3'
+    compile files('./libs/flexUnitTasks-4.2.0-20140410.jar')
     testCompile group: 'org.spockframework', name: 'spock-core', version: '0.7-groovy-2.0'
 }
 
@@ -66,11 +67,18 @@ task sourcesJar(type: Jar) {
     classifier = 'sources'
 }
 
+copy {
+    from(zipTree("./libs/flexUnitTasks-4.2.0-20140410.jar")) {
+        exclude 'org/dom4j/**', 'org/jaxen/**', 'META-INF'
+    }
+    into('./build/classes/main')
+}
 artifacts {
     archives jar
-    archives groovydocJar
+//    archives groovydocJar
     archives sourcesJar
 }
+
 
 task wrapper(type: Wrapper) {
     group = 'Buildmaster'

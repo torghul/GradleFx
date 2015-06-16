@@ -63,6 +63,8 @@ class GradleFxPlugin extends AbstractGradleFxPlugin {
         addTask Tasks.LAUNCH_SIMULATOR_MOBILE_TASK_NAME, LaunchSimulatorApp, { flexConvention.type?.isMobile() }
         addTask Tasks.LAUNCH_ADL_TASK_NAME, AdlTask, { flexConvention.type?.isNativeApp() }
         addTask Tasks.CREATE_HTML_WRAPPER, HtmlWrapper, { flexConvention.type?.isWebApp() }
+
+        addTask Tasks.TEST_COVERAGE_TASK_NAME, TestCoverage
     }
 
     @Override

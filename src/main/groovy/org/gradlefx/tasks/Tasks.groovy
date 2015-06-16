@@ -36,4 +36,5 @@ class Tasks {
     public static final String LAUNCH_ADL_TASK_NAME = 'launchAdl'
     public static final String PACKAGE_SIMULATOR_MOBILE_TASK_NAME = 'packageSimulatorMobile'
     public static final String UNINSTALL_SIMULATOR_MOBILE_TASK_NAME = 'uninstallSimulatorMobile'
+    public static final String TEST_COVERAGE_TASK_NAME = 'testCoverage'
 }
