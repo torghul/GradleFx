@@ -44,6 +44,9 @@ class FlexUnitConvention {
     private List <String> includes  = ['**/*Test.as']
     private List <String> excludes  = []
     private String swfName          = 'TestRunner.swf'
+    private Boolean coverage        = true
+    private List<String> coverageSources = new ArrayList<String>()
+    private List<String> coverageExclusions = new ArrayList<String>()
     //list of additional compiler options as defined by the compc or mxmlc compiler
     private List <String> additionalCompilerOptions = []
     
@@ -206,5 +209,29 @@ class FlexUnitConvention {
 
     void additionalCompilerOptions(List<String> options) {
         this.additionalCompilerOptions = options
+    }
+
+    Boolean getCoverage() {
+        return coverage
+    }
+
+    void coverage(Boolean coverage) {
+        this.coverage = coverage
+    }
+
+    List<String> getCoverageSources() {
+        return coverageSources
+    }
+
+    void coverageSources(List<String> coverageSources) {
+        this.coverageSources = coverageSources
+    }
+
+    List<String> getCoverageExclusions() {
+        return coverageExclusions
+    }
+
+    void coverageExclusions(List<String> coverageExclusions) {
+        this.coverageExclusions = coverageExclusions
     }
 }

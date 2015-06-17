@@ -46,6 +46,9 @@ if(hasProperty("release")) {
 
 repositories {
     mavenCentral()
+    maven {
+        url "https://repository.sonatype.org/content/groups/forge"
+    }
 }
 
 dependencies {
@@ -53,7 +56,9 @@ dependencies {
     compile group: 'commons-lang', name: 'commons-lang', version: '2.6'
     compile group: 'commons-io', name: 'commons-io', version: '2.4'
     compile group: 'org.codehaus.groovy', name: 'groovy-all', version: '2.3.3'
-    compile files('./libs/flexUnitTasks-4.2.0-20140410.jar')
+    compile group: 'dom4j', name: 'dom4j', version: '1.6.1'
+    compile group: 'net.sourceforge.cobertura', name: 'cobertura', version: '2.1.1'
+    compile group: 'com.googlecode.apparat', name:'apparat-core', version: '1.0.RC8'
     testCompile group: 'org.spockframework', name: 'spock-core', version: '0.7-groovy-2.0'
 }
 
@@ -67,12 +72,6 @@ task sourcesJar(type: Jar) {
     classifier = 'sources'
 }
 
-copy {
-    from(zipTree("./libs/flexUnitTasks-4.2.0-20140410.jar")) {
-        exclude 'org/dom4j/**', 'org/jaxen/**', 'META-INF'
-    }
-    into('./build/classes/main')
-}
 artifacts {
     archives jar
 //    archives groovydocJar

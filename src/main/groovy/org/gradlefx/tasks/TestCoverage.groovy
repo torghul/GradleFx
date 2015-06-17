@@ -17,14 +17,23 @@
 package org.gradlefx.tasks
 
 import groovy.text.SimpleTemplateEngine
+import org.apache.tools.ant.BuildException
+import org.flexunit.ant.FlexUnitSocketServer
+import org.flexunit.ant.FlexUnitSocketThread
 import org.flexunit.ant.launcher.OperatingSystem
 import org.flexunit.ant.launcher.commands.player.PlayerCommand
 import org.flexunit.ant.launcher.commands.player.PlayerCommandFactory
+import org.flexunit.ant.launcher.contexts.ExecutionContext
+import org.flexunit.ant.launcher.contexts.ExecutionContextFactory
+import org.flexunit.ant.report.Report
+import org.flexunit.ant.report.Reports
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.FileTree
 import org.gradle.api.file.FileTreeElement
 import org.gradle.api.logging.LogLevel
 import org.gradle.api.tasks.TaskAction
+import org.gradle.mvn3.org.codehaus.plexus.util.xml.Xpp3Dom
+import org.gradle.mvn3.org.codehaus.plexus.util.xml.Xpp3DomBuilder
 import org.gradlefx.cli.compiler.AntBasedCompilerProcess
 import org.gradlefx.cli.compiler.CompilerJar
 import org.gradlefx.cli.compiler.CompilerProcess
@@ -38,6 +47,15 @@ import org.gradlefx.conventions.GradleFxConvention
 import org.gradlefx.util.PathToClassNameExtractor
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.sonatype.flexmojos.coverage.CoverageReportRequest
+import org.sonatype.flexmojos.coverage.cobertura.CoberturaCoverageReport
+import org.sonatype.flexmojos.test.report.TestCoverageReport
+
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future;
+
 /*
  * A Gradle task to execute FlexUnit tests.
  */
@@ -59,6 +77,7 @@ class TestCoverage extends DefaultTask {
         dependsOn Tasks.COPY_TEST_RESOURCES_TASK_NAME
 
         pathToClassNameExtractor = new PathToClassNameExtractor()
+        reports = new Reports()
     }
 
     @TaskAction
@@ -200,28 +219,35 @@ class TestCoverage extends DefaultTask {
             )
         }
 
-        PlayerCommand player = PlayerCommandFactory.createPlayer(OperatingSystem.identify(), flexUnit.player, new File(flexUnit.command), flexUnit.localTrusted)
-        player.setProject(ant.project)
-        player.setSwf(project.file("${flexConvention.flexUnit.toDir}/${flexConvention.flexUnit.swfName}"))
-        player.prepare()
-        Process process = player.launch()
-//sleep(10000)
-//        process.destroy()
-//        ant.flexunit (
-//                swf:             "${flexConvention.flexUnit.toDir}/${flexConvention.flexUnit.swfName}",
-//                player:          flexUnit.player,
-//                command:         flexUnit.command,
-//                toDir:           flexUnit.toDir,
-//                workingDir:      flexUnit.workingDir,
-//                haltonfailure:   flexUnit.haltOnFailure,
-//                verbose:         flexUnit.verbose,
-//                localTrusted:    flexUnit.localTrusted,
-//                port:            flexUnit.port,
-//                buffer:          flexUnit.buffer,
-//                timeout:         flexUnit.timeout,
-//                failureproperty: flexUnit.failureProperty,
-//                headless:        flexUnit.headless,
-//                display:         flexUnit.display)
+        File[] sources = initCoverageInstrumentation()
+
+        try {
+            logger.info("Starting tests...")
+            Future<Object> daemon = setupSocketThread()
+
+            PlayerCommand player = obtainPlayer()
+
+            ExecutionContext context = obtainContext(player)
+
+            //start the execution context
+            context.start()
+
+            Process process = player.launch()
+
+            // block until daemon is completely done with all test data
+            daemon.get()
+
+            //stop the execution context now that socket thread is done
+            context.stop(process)
+
+            logger.info("Tests complete.")
+            // print summaries and check for failure
+            analyzeReports();
+        } catch (Exception e) {
+            throw new BuildException(e);
+        }
+
+        generateCoverageReports(sources)
 
         if (ant.properties[flexUnit.failureProperty] == "true") {
             def msg = 'Tests failed'
@@ -229,6 +255,163 @@ class TestCoverage extends DefaultTask {
             else { throw new Exception(msg) }
         }
     }
+
+    private void generateCoverageReports(File[] sources) {
+        FlexUnitConvention flexUnit = flexConvention.flexUnit
+
+        if (createCoverageReports == true) {
+            try
+            {
+                logger.info("Analyzing coverage data...");
+                for (Report report : reports.values())
+                {
+                    for (String reportxml : report.xmls)
+                    {
+                        for (Xpp3Dom child : Xpp3DomBuilder.build(new StringReader(reportxml)).getChildren("coverage"))
+                        {
+                            TestCoverageReport tcr = new TestCoverageReport(child)
+                            reporter.addResult(tcr.getClassname(), tcr.getTouchs())
+                        }
+                    }
+                }
+
+                logger.info("Generating coverage report...");
+                List<String> formats = new ArrayList<String>()
+                formats.add("html")
+                formats.add("xml")
+                CoverageReportRequest request = new CoverageReportRequest(project.file(flexUnit.toDir), formats, "UTF-8",
+                        project.file(flexUnit.toDir), sources)
+                reporter.generateReport(request)
+            }
+            catch (Exception e)
+            {
+                throw new BuildException(e)
+            }
+        }
+    }
+    private boolean createCoverageReports;
+    /**
+     * End of test report run. Called at the end of a test run. If verbose is set
+     * to true reads all suites in the suite list and prints out a descriptive
+     * message including the name of the suite, number of tests run and number of
+     * tests failed, ignores any errors. If any tests failed during the test run,
+     * the build is halted.
+     */
+    protected void analyzeReports()
+    {
+//        LoggingUtil.log("Analyzing reports ...");
+
+        // print out all report summaries
+//        LoggingUtil.log("\n" + reports.getSummary(), true);
+        logger.info("Analyzing reports...")
+        FlexUnitConvention flexUnit = flexConvention.flexUnit
+
+        if (reports.hasFailures())
+        {
+            flexUnit.failureProperty("true")
+
+            if (flexUnit.haltOnFailure)
+            {
+                throw new BuildException("FlexUnit tests failed during the test run.");
+            }
+        }
+    }
+
+    private CoberturaCoverageReport reporter = null;
+
+    private File[] initCoverageInstrumentation() {
+        FlexUnitConvention flexUnit = flexConvention.flexUnit
+
+        File[] sources
+        createCoverageReports = true
+        try
+        {
+            sources = new File[flexUnit.coverageSources.size()];
+            for (int j=0;j<flexUnit.coverageSources.size();j++)
+            {
+                sources[j] = new File(flexUnit.coverageSources.get(j));
+            }
+            if (sources.length > 0) {
+                logger.info("Instrumenting ${flexConvention.flexUnit.toDir}/${flexConvention.flexUnit.swfName}...")
+
+                reporter = new CoberturaCoverageReport()
+                reporter.initialize()
+                String[] excludes = new String[flexUnit.coverageExclusions.size()]
+                for (int i=0;i<flexUnit.coverageExclusions.size();i++)
+                {
+                    excludes[i] = flexUnit.coverageExclusions.get(i)
+                }
+                reporter.setExcludes(excludes)
+                def swf = project.file("${flexConvention.flexUnit.toDir}/${flexConvention.flexUnit.swfName}")
+                reporter.instrument(swf, sources)
+                logger.info("Instrumenting complete.")
+            } else {
+                createCoverageReports = false
+            }
+            return sources
+        }
+        catch (Exception e)
+        {
+            throw new BuildException(e)
+        }
+    }
+
+    private PlayerCommand obtainPlayer() {
+        FlexUnitConvention flexUnit = flexConvention.flexUnit
+        PlayerCommand player = PlayerCommandFactory.createPlayer(OperatingSystem.identify(), flexUnit.player, new File(flexUnit.command), flexUnit.localTrusted)
+        player.setProject(ant.project)
+        player.setSwf(project.file("${flexConvention.flexUnit.toDir}/${flexConvention.flexUnit.swfName}"))
+
+        return player
+    }
+
+    /**
+     *
+     * @param player PlayerCommand which should be executed
+     * @return Context to wrap the execution of the PlayerCommand
+     */
+    protected ExecutionContext obtainContext(PlayerCommand player)
+    {
+        FlexUnitConvention flexUnit = flexConvention.flexUnit
+        ExecutionContext context = ExecutionContextFactory.createContext(
+                OperatingSystem.identify(),
+                flexUnit.headless,
+                flexUnit.display)
+
+        context.setProject(ant.project)
+        context.setCommand(player)
+
+        return context
+    }
+
+    /**
+     * Create a server socket for receiving the test reports from FlexUnit. We
+     * read and write the test reports inside of a Thread.
+     */
+    protected Future<Object> setupSocketThread()
+    {
+        FlexUnitConvention flexUnit = flexConvention.flexUnit
+        def usePolicyfile = !flexUnit.localTrusted && flexUnit.player.equals("flash")
+        def socketTimeout = 60000
+        def serverBufferSize = 262144
+
+        // Create server for use by thread
+        FlexUnitSocketServer server = new FlexUnitSocketServer(flexUnit.port,
+                socketTimeout, serverBufferSize,
+                usePolicyfile)
+
+        // Get handle to specialized object to run in separate thread.
+        Callable<Object> operation = new FlexUnitSocketThread(server,
+                project.file(flexUnit.toDir), reports)
+
+        // Get handle to service to run object in thread.
+        ExecutorService executor = Executors.newSingleThreadExecutor()
+
+        // Run object in thread and return Future.
+        return executor.submit(operation)
+    }
+
+    private Reports reports;
 
     private void configureAntWithFlexUnit() {
         new FlexUnitAntTasksConfigurator(project).configure()
