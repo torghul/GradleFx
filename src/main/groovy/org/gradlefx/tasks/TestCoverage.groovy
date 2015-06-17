@@ -329,7 +329,7 @@ class TestCoverage extends DefaultTask {
             sources = new File[flexUnit.coverageSources.size()];
             for (int j=0;j<flexUnit.coverageSources.size();j++)
             {
-                sources[j] = new File(flexUnit.coverageSources.get(j));
+                sources[j] = project.file(flexUnit.coverageSources.get(j));
             }
             if (sources.length > 0) {
                 logger.info("Instrumenting ${flexConvention.flexUnit.toDir}/${flexConvention.flexUnit.swfName}...")
